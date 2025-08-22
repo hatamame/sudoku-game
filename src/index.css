@@ -1,1 +1,143 @@
 @import 'tailwindcss';
+
+@layer utilities {
+
+    /* 数字入力時のポップアニメーション */
+    @keyframes pop {
+        0% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.25);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    .animate-pop {
+        animation: pop 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+    }
+
+    /* 選択中セルのグローエフェクト */
+    @keyframes glow {
+
+        0%,
+        100% {
+            box-shadow: 0 0 5px 2px rgba(196, 181, 253, 0.7);
+        }
+
+        /* purple-300 */
+        50% {
+            box-shadow: 0 0 12px 4px rgba(167, 139, 250, 0.7);
+        }
+
+        /* purple-400 */
+    }
+
+    .dark .animate-glow {
+        animation-name: glow-dark;
+    }
+
+    @keyframes glow-dark {
+
+        0%,
+        100% {
+            box-shadow: 0 0 5px 2px rgba(167, 139, 250, 0.7);
+        }
+
+        /* purple-400 */
+        50% {
+            box-shadow: 0 0 12px 4px rgba(139, 92, 246, 0.7);
+        }
+
+        /* purple-500 */
+    }
+
+    .animate-glow {
+        animation: glow 2s infinite ease-in-out;
+    }
+
+    /* 重複かつ選択中の枠線 */
+    @keyframes pulse-border {
+        0% {
+            box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7);
+        }
+
+        /* red-600 */
+        70% {
+            box-shadow: 0 0 0 6px rgba(220, 38, 38, 0);
+        }
+
+        100% {
+            box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+        }
+    }
+
+    .dark .animate-pulse-border {
+        animation-name: pulse-border-dark;
+    }
+
+    @keyframes pulse-border-dark {
+        0% {
+            box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.7);
+        }
+
+        /* red-400 */
+        70% {
+            box-shadow: 0 0 0 6px rgba(248, 113, 113, 0);
+        }
+
+        100% {
+            box-shadow: 0 0 0 0 rgba(248, 113, 113, 0);
+        }
+    }
+
+    .animate-pulse-border {
+        animation: pulse-border 1.5s infinite;
+    }
+
+    /* クリア時のフェードイン */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .animate-fade-in {
+        animation: fadeIn 0.5s ease-out forwards;
+    }
+
+    /* 背景のグラデーションアニメーション */
+    @keyframes gradient-move {
+        0% {
+            background-position: 0% 50%;
+        }
+
+        50% {
+            background-position: 100% 50%;
+        }
+
+        100% {
+            background-position: 0% 50%;
+        }
+    }
+
+    .animated-gradient {
+        background-size: 200% 200%;
+        background-image: linear-gradient(45deg, #f1f5f9, #e0e7ff, #f1f5f9);
+        animation: gradient-move 15s ease infinite;
+    }
+
+    .dark .animated-gradient {
+        background-image: linear-gradient(45deg, #0f172a, #1e1b4b, #0f172a);
+    }
+}
