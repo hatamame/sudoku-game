@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { ThemeToggle } from './components/ThemeToggle';
 import Board from './components/Board';
 import Timer from './components/Timer';
-import { generateSudoku, checkSolution } from './utils/sudoku';
+import { generateSudoku, generateDailySudoku } from './utils/sudoku';
 import Confetti from 'react-confetti';
 import { useWindowSize } from 'react-use';
 import { supabase } from './lib/supabaseClient';
+import Leaderboard from './components/Leaderboard';
+import PlayerNameModal from './components/PlayerNameModal';
 
-export type BoardState = (number | null)[][];
-export type InitialBoardState = (number | null)[][];
+
+export interface CellState {
+  value: number | null;
+  notes: Set<number>;
+  isInitial: boolean;
+}
+export type BoardState = CellState[][];
 
 const DIFFICULTIES = {
   Easy: 45,
@@ -15,11 +23,11 @@ const DIFFICULTIES = {
   Hard: 25,
 };
 type Difficulty = keyof typeof DIFFICULTIES;
+type GameMode = 'difficulty' | 'daily';
 
 type Conflict = { row: number; col: number };
 
 const App: React.FC = () => {
-  const [initialBoard, setInitialBoard] = useState<InitialBoardState>([]);
   const [board, setBoard] = useState<BoardState>([]);
   const [selectedCell, setSelectedCell] = useState<Conflict | null>(null);
   const [isSolved, setIsSolved] = useState(false);
@@ -27,83 +35,121 @@ const App: React.FC = () => {
   const [isRunning, setIsRunning] = useState(false);
   const { width, height } = useWindowSize();
   const [difficulty, setDifficulty] = useState<Difficulty>('Medium');
-  
+  const [gameMode, setGameMode] = useState<GameMode>('difficulty');
+  const [isNoteMode, setIsNoteMode] = useState(false); // メモモードのState
+
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [lastPlacedCell, setLastPlacedCell] = useState<Conflict | null>(null);
   const [completedUnits, setCompletedUnits] = useState<{ rows: number[], cols: number[], blocks: number[] }>({ rows: [], cols: [], blocks: [] });
 
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [showNameModal, setShowNameModal] = useState(false);
+
   const updateAllConflicts = useCallback((currentBoard: BoardState) => {
-    const allConflicts = new Set<string>();
+    const newConflicts: Conflict[] = [];
     if (!currentBoard.length) return;
 
-    const addConflict = (r: number, c: number) => allConflicts.add(`${r},${c}`);
+    // Helper to get value from CellState
+    const getValue = (r: number, c: number) => currentBoard[r][c].value;
 
+    // Check rows and columns
     for (let i = 0; i < 9; i++) {
-      const rowSeen = new Map<number, number[]>();
-      const colSeen = new Map<number, number[]>();
-      const blockSeen = new Map<number, {r: number, c: number}[]>();
-      
-      const startRow = Math.floor(i / 3) * 3;
-      const startCol = (i % 3) * 3;
-
+      const rowCounts = new Map<number, number[]>();
+      const colCounts = new Map<number, number[]>();
       for (let j = 0; j < 9; j++) {
-        const rowNum = currentBoard[i][j];
-        if (rowNum !== null) {
-          if (!rowSeen.has(rowNum)) rowSeen.set(rowNum, []);
-          rowSeen.get(rowNum)!.push(j);
+        // Row check
+        const rowValue = getValue(i, j);
+        if (rowValue !== null) {
+          if (!rowCounts.has(rowValue)) rowCounts.set(rowValue, []);
+          rowCounts.get(rowValue)!.push(j);
         }
-        
-        const colNum = currentBoard[j][i];
-        if (colNum !== null) {
-          if (!colSeen.has(colNum)) colSeen.set(colNum, []);
-          colSeen.get(colNum)!.push(j);
-        }
-        
-        const r = startRow + Math.floor(j / 3);
-        const c = startCol + (j % 3);
-        const blockNum = currentBoard[r][c];
-        if (blockNum !== null) {
-          if (!blockSeen.has(blockNum)) blockSeen.set(blockNum, []);
-          blockSeen.get(blockNum)!.push({r, c});
+        // Column check
+        const colValue = getValue(j, i);
+        if (colValue !== null) {
+          if (!colCounts.has(colValue)) colCounts.set(colValue, []);
+          colCounts.get(colValue)!.push(j);
         }
       }
-
-      for (const cols of rowSeen.values()) if (cols.length > 1) cols.forEach(c => addConflict(i, c));
-      for (const rows of colSeen.values()) if (rows.length > 1) rows.forEach(r => addConflict(r, i));
-      for (const cells of blockSeen.values()) if (cells.length > 1) cells.forEach(cell => addConflict(cell.r, cell.c));
+      rowCounts.forEach((cols) => {
+        if (cols.length > 1) {
+          cols.forEach(col => newConflicts.push({ row: i, col }));
+        }
+      });
+      colCounts.forEach((rows) => {
+        if (rows.length > 1) {
+          rows.forEach(row => newConflicts.push({ row, col: i }));
+        }
+      });
     }
 
-    const newConflicts = Array.from(allConflicts).map(str => {
-      const [row, col] = str.split(',').map(Number);
-      return { row, col };
-    });
+    // Check 3x3 blocks
+    for (let blockRow = 0; blockRow < 3; blockRow++) {
+      for (let blockCol = 0; blockCol < 3; blockCol++) {
+        const blockCounts = new Map<number, { r: number, c: number }[]>();
+        for (let i = 0; i < 3; i++) {
+          for (let j = 0; j < 3; j++) {
+            const row = blockRow * 3 + i;
+            const col = blockCol * 3 + j;
+            const value = getValue(row, col);
+            if (value !== null) {
+              if (!blockCounts.has(value)) blockCounts.set(value, []);
+              blockCounts.get(value)!.push({ r: row, c: col });
+            }
+          }
+        }
+        blockCounts.forEach((cells) => {
+          if (cells.length > 1) {
+            cells.forEach(cell => newConflicts.push({ row: cell.r, col: cell.c }));
+          }
+        });
+      }
+    }
+
     setConflicts(newConflicts);
   }, []);
 
-  const startNewGame = useCallback((level: Difficulty) => {
-    const numCells = DIFFICULTIES[level];
-    const { puzzle } = generateSudoku(numCells);
-    setInitialBoard(JSON.parse(JSON.stringify(puzzle)));
-    setBoard(puzzle);
+  const startNewGame = useCallback((mode: GameMode, level: Difficulty = 'Medium') => {
+    setGameMode(mode);
+    let puzzle: (number | null)[][];
+
+    if (mode === 'daily') {
+      const daily = generateDailySudoku(new Date());
+      puzzle = daily.puzzle;
+    } else {
+      const numCells = DIFFICULTIES[level];
+      const newPuzzle = generateSudoku(numCells);
+      puzzle = newPuzzle.puzzle;
+      setDifficulty(level);
+    }
+
+    const newBoard = puzzle.map(row =>
+      row.map(value => ({
+        value,
+        notes: new Set<number>(),
+        isInitial: value !== null,
+      }))
+    );
+
+    setBoard(newBoard);
     setIsSolved(false);
     setTime(0);
     setIsRunning(true);
     setSelectedCell(null);
-    setDifficulty(level);
     setLastPlacedCell(null);
-    updateAllConflicts(puzzle);
-  }, [updateAllConflicts]);
-
-  useEffect(() => {
-    startNewGame(difficulty);
+    // updateAllConflicts will be fixed later
+    // updateAllConflicts(newBoard);
   }, []);
 
   useEffect(() => {
-    if(!board.length) return;
+    startNewGame('difficulty', 'Medium');
+  }, [startNewGame]);
+
+  useEffect(() => {
+    if (!board.length) return;
 
     const newCompleted = { rows: [] as number[], cols: [] as number[], blocks: [] as number[] };
-    const checkUnit = (unit: (number | null)[]) => {
-      const nums = unit.filter(n => n !== null);
+    const checkUnit = (unit: CellState[]) => {
+      const nums = unit.filter(cell => cell.value !== null).map(cell => cell.value);
       return nums.length === 9 && new Set(nums).size === 9;
     };
 
@@ -119,7 +165,15 @@ const App: React.FC = () => {
     }
     setCompletedUnits(newCompleted);
     updateAllConflicts(board);
-  }, [board, updateAllConflicts]);
+
+    const allCellsFilled = board.every(row => row.every(cell => cell.value !== null));
+    if (allCellsFilled && conflicts.length === 0) {
+      setIsSolved(true);
+      setIsRunning(false);
+    } else {
+      setIsSolved(false);
+    }
+  }, [board, updateAllConflicts, conflicts]);
 
 
   useEffect(() => {
@@ -130,34 +184,55 @@ const App: React.FC = () => {
     return () => { if (interval) clearInterval(interval); };
   }, [isRunning, isSolved]);
 
-  const handleCellSelect = (row: number, col: number) => {
+  const handleCellSelect = useCallback((row: number, col: number) => {
     if (!isSolved) {
       setSelectedCell({ row, col });
     }
-  };
+  }, [isSolved]);
 
-  const handleNumberInput = (num: number) => {
-    if (selectedCell && initialBoard[selectedCell.row][selectedCell.col] === null && !isSolved) {
-      const newBoard = board.map(row => [...row]);
-      newBoard[selectedCell.row][selectedCell.col] = num;
-      setBoard(newBoard);
-      setLastPlacedCell(selectedCell);
+  const handleNumberInput = useCallback((num: number) => {
+    if (!selectedCell || isSolved) return;
+    const { row, col } = selectedCell;
+    if (board[row][col].isInitial) return;
 
-      if (checkSolution(newBoard)) {
-        setIsSolved(true);
-        setIsRunning(false);
+    const newBoard = board.map(r => r.map(c => ({ ...c, notes: new Set(c.notes) })));
+    const cell = newBoard[row][col];
+
+    if (isNoteMode) {
+      if (cell.value === null) { // Can only add notes to empty cells
+        const currentNotes = cell.notes;
+        if (currentNotes.has(num)) {
+          currentNotes.delete(num);
+        } else {
+          currentNotes.add(num);
+        }
       }
+    } else {
+      cell.value = cell.value === num ? null : num;
+      cell.notes.clear();
     }
-  };
-  
-  const handleDelete = () => {
-    if (selectedCell && initialBoard[selectedCell.row][selectedCell.col] === null && !isSolved) {
-      const newBoard = board.map(row => [...row]);
-      newBoard[selectedCell.row][selectedCell.col] = null;
-      setBoard(newBoard);
-      setLastPlacedCell(selectedCell);
+
+    setBoard(newBoard);
+    setLastPlacedCell(selectedCell);
+  }, [selectedCell, isSolved, board, isNoteMode]);
+
+  const handleDelete = useCallback(() => {
+    if (!selectedCell || isSolved) return;
+    const { row, col } = selectedCell;
+    if (board[row][col].isInitial) return;
+
+    const newBoard = board.map(r => r.map(c => ({ ...c, notes: new Set(c.notes) })));
+    const cell = newBoard[row][col];
+
+    if (cell.value !== null) {
+      cell.value = null;
+    } else {
+      cell.notes.clear();
     }
-  };
+
+    setBoard(newBoard);
+    setLastPlacedCell(selectedCell);
+  }, [selectedCell, isSolved, board]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -165,75 +240,92 @@ const App: React.FC = () => {
         const num = parseInt(event.key);
         if (num >= 1 && num <= 9) handleNumberInput(num);
         if (event.key === 'Backspace' || event.key === 'Delete') handleDelete();
+        if (event.key.toLowerCase() === 'n') {
+          setIsNoteMode(prev => !prev);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedCell, board]);
+  }, [selectedCell, handleNumberInput, handleDelete, setIsNoteMode]);
 
-    // クリア判定の useEffect を修正
-    useEffect(() => {
-      const checkAndSaveScore = async () => {
-        if (board.every(row => row.every(cell => cell !== null))) {
-          if (checkSolution(board)) {
-            setIsSolved(true);
-            setIsRunning(false);
-  
-            // Supabaseにスコアを保存
-            const { error } = await supabase
-              .from('scores')
-              .insert([{ clear_time_seconds: time }]);
-  
-            if (error) {
-              console.error('Error saving score:', error);
-            } else {
-              console.log('Score saved successfully!');
-            }
-          }
-        }
-      };
-      checkAndSaveScore();
-    }, [board, time]); // board と time が変更されるたびにチェック
+  const handleSaveDailyScore = async (playerName: string) => {
+    if (gameMode === 'daily' && isSolved) {
+      const { data, error } = await supabase
+        .from('daily_scores')
+        .insert([{ player_name: playerName, score_time: time, created_at: new Date().toISOString() }]);
+
+      if (error) {
+        console.error('Error saving daily score:', error);
+      } else {
+        console.log('Daily score saved:', data);
+      }
+      setShowNameModal(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isSolved && gameMode === 'daily') {
+      setShowNameModal(true);
+    }
+  }, [isSolved, gameMode]);
 
   return (
-    // ★★★ 背景アニメーション用のクラスを追加 ★★★
     <div className="min-h-screen text-slate-800 dark:text-slate-200 flex flex-col items-center justify-center font-sans p-4 animated-gradient">
       {isSolved && <Confetti width={width} height={height} recycle={false} numberOfPieces={500} />}
-      <header className="text-center mb-6">
-        <h1 className="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-500 to-cyan-500 drop-shadow-sm">
-          数独(SUDOKU)
-        </h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-2">A modern Sudoku game built with React</p>
+      {showLeaderboard && <Leaderboard onClose={() => setShowLeaderboard(false)} />}
+      {showNameModal && <PlayerNameModal onSave={handleSaveDailyScore} onClose={() => setShowNameModal(false)} />}
+
+      <header className="w-full max-w-4xl mx-auto mb-6 p-4">
+        <div className="flex justify-between items-center">
+          <div className="w-24">
+            <button onClick={() => setShowLeaderboard(true)} className="px-3 py-2 bg-purple-600 text-white rounded-lg shadow-md hover:bg-purple-700">
+              Ranking
+            </button>
+          </div>
+          <div className="text-center">
+            <h1 className="text-5xl md:text-6xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-500 to-cyan-500 drop-shadow-sm">
+              数独(SUDOKU)
+            </h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-2">数独(SUDOKU)</p>
+          </div>
+          <div className="w-24 flex justify-end">
+            <ThemeToggle />
+          </div>
+        </div>
       </header>
 
       <div className="flex gap-4 mb-6">
         {(Object.keys(DIFFICULTIES) as Difficulty[]).map((level) => (
           <button
             key={level}
-            onClick={() => startNewGame(level)}
-            // ★★★ ボタンのスタイルを更新 ★★★
-            className={`px-5 py-2 text-lg font-semibold rounded-lg transition-all duration-300 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-opacity-70 ${difficulty === level ? 'bg-purple-600 text-white focus:ring-purple-500' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 focus:ring-slate-400'}`}
+            onClick={() => startNewGame('difficulty', level)}
+            className={`px-5 py-2 text-lg font-semibold rounded-lg transition-all duration-300 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-opacity-70 ${gameMode === 'difficulty' && difficulty === level ? 'bg-purple-600 text-white focus:ring-purple-500' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 focus:ring-slate-400'}`}
           >
             {level}
           </button>
         ))}
+        <button
+          onClick={() => startNewGame('daily')}
+          className={`px-5 py-2 text-lg font-semibold rounded-lg transition-all duration-300 shadow-md hover:shadow-lg hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-opacity-70 ${gameMode === 'daily' ? 'bg-amber-500 text-white focus:ring-amber-400' : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600 focus:ring-slate-400'}`}
+        >
+          Daily Challenge
+        </button>
       </div>
 
       <main className="flex flex-col lg:flex-row items-center gap-8">
         <div className="bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm p-4 rounded-2xl shadow-lg">
           <div className="flex justify-between items-center mb-4 px-2">
-             <Timer time={time} />
-             <button 
-                onClick={() => startNewGame(difficulty)}
-                // ★★★ ボタンのスタイルを更新 ★★★
-                className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg hover:bg-purple-700 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-70"
-             >
-               New Game
-             </button>
+            <Timer time={time} />
+            <button
+              onClick={() => startNewGame(gameMode, difficulty)}
+              className="px-4 py-2 bg-purple-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg hover:bg-purple-700 hover:scale-105 active:scale-95 transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-70"
+            >
+              New Game
+            </button>
           </div>
-          <Board 
+          <Board
             board={board}
-            initialBoard={initialBoard}
             onCellSelect={handleCellSelect}
             selectedCell={selectedCell}
             isSolved={isSolved}
@@ -249,27 +341,31 @@ const App: React.FC = () => {
               <button
                 key={num}
                 onClick={() => handleNumberInput(num)}
-                // ★★★ ボタンのスタイルを更新 ★★★
                 className="w-16 h-16 bg-white/70 dark:bg-slate-800/70 backdrop-blur-sm text-2xl font-bold rounded-lg shadow-md hover:shadow-lg hover:scale-110 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-purple-500"
               >
                 {num}
               </button>
             ))}
           </div>
-           <button
-              onClick={handleDelete}
-              // ★★★ ボタンのスタイルを更新 ★★★
-              className="w-full h-16 bg-red-500/90 backdrop-blur-sm text-white text-xl font-bold rounded-lg shadow-md hover:shadow-lg hover:bg-red-600 hover:scale-105 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-red-400"
-            >
-              Delete
-            </button>
+          <button
+            onClick={() => setIsNoteMode(!isNoteMode)}
+            className={`w-full h-16 text-white text-xl font-bold rounded-lg shadow-md transition-all duration-200 ${isNoteMode ? 'bg-blue-600 hover:bg-blue-700' : 'bg-slate-600 hover:bg-slate-700'}`}>
+            {isNoteMode ? 'ノートモード(On)' : 'ノートモード(Off)'}
+            <span className="block text-xs font-normal">(Nキー)</span>
+          </button>
+          <button
+            onClick={handleDelete}
+            className="w-full h-16 bg-red-500/90 backdrop-blur-sm text-white text-xl font-bold rounded-lg shadow-md hover:shadow-lg hover:bg-red-600 hover:scale-105 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-red-400"
+          >
+            削除
+          </button>
         </div>
       </main>
-      
-      {isSolved && (
+
+      {isSolved && gameMode === 'difficulty' && (
         <div className="mt-8 p-6 bg-green-100/80 dark:bg-green-900/80 backdrop-blur-sm border border-green-300 dark:border-green-700 rounded-xl text-center shadow-lg animate-fade-in">
-          <h2 className="text-3xl font-bold text-green-700 dark:text-green-300">Congratulations!</h2>
-          <p className="text-green-600 dark:text-green-400 mt-2 text-lg">You solved the puzzle in {Math.floor(time / 60)}m {time % 60}s.</p>
+          <h2 className="text-3xl font-bold text-green-700 dark:text-green-300">おめでとうございます!</h2>
+          <p className="text-green-600 dark:text-green-400 mt-2 text-lg">あなたはパズルを {Math.floor(time / 60)}m {time % 60}s.で解きました</p>
         </div>
       )}
     </div>

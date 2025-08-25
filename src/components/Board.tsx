@@ -1,10 +1,9 @@
 import React from 'react';
 import Cell from './Cell';
-import type { BoardState, InitialBoardState } from '../App';
+import type { BoardState, CellState } from '../App';
 
 interface BoardProps {
   board: BoardState;
-  initialBoard: InitialBoardState;
   onCellSelect: (row: number, col: number) => void;
   selectedCell: { row: number; col: number } | null;
   isSolved: boolean;
@@ -14,11 +13,11 @@ interface BoardProps {
   completedUnits: { rows: number[], cols: number[], blocks: number[] };
 }
 
-const Board: React.FC<BoardProps> = ({ board, initialBoard, onCellSelect, selectedCell, isSolved, conflicts, lastPlacedCell, completedUnits }) => {
+const Board: React.FC<BoardProps> = ({ board, onCellSelect, selectedCell, isSolved, conflicts, lastPlacedCell, completedUnits }) => {
   return (
     <div className="grid grid-cols-9 bg-slate-300 dark:bg-slate-600 border-2 border-slate-400 dark:border-slate-500">
       {board.map((row, rowIndex) =>
-        row.map((cell, colIndex) => {
+        row.map((cellData: CellState, colIndex) => {
           const blockIndex = Math.floor(rowIndex / 3) * 3 + Math.floor(colIndex / 3);
           const isConflict = conflicts.some(c => c.row === rowIndex && c.col === colIndex);
           const isCompleted = completedUnits.rows.includes(rowIndex) || completedUnits.cols.includes(colIndex) || completedUnits.blocks.includes(blockIndex);
@@ -27,8 +26,9 @@ const Board: React.FC<BoardProps> = ({ board, initialBoard, onCellSelect, select
           return (
             <Cell
               key={`${rowIndex}-${colIndex}`}
-              value={cell}
-              isInitial={initialBoard[rowIndex][colIndex] !== null}
+              value={cellData.value}
+              notes={cellData.notes}
+              isInitial={cellData.isInitial}
               isSelected={selectedCell?.row === rowIndex && selectedCell?.col === colIndex}
               isRelated={
                 selectedCell !== null &&
