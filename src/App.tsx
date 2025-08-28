@@ -251,14 +251,22 @@ const App: React.FC = () => {
 
   const handleSaveDailyScore = async (playerName: string) => {
     if (gameMode === 'daily' && isSolved) {
+      const today = new Date();
+      const challenge_date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
       const { data, error } = await supabase
         .from('daily_scores')
-        .insert([{ player_name: playerName, score_time: time, created_at: new Date().toISOString() }]);
+        .insert([{
+          player_name: playerName,
+          clear_time_seconds: time,
+          challenge_date: challenge_date
+        }]);
 
       if (error) {
         console.error('Error saving daily score:', error);
       } else {
         console.log('Daily score saved:', data);
+        setShowLeaderboard(true);
       }
       setShowNameModal(false);
     }
